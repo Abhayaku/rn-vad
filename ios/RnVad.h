@@ -1,5 +1,4 @@
 #import <RnVadSpec/RnVadSpec.h>
 
-@interface RnVad : NSObject <NativeRnVadSpec>
-
+@interface RnVad : NativeRnVadSpecBase <NativeRnVadSpec>
 @end

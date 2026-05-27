@@ -84,3 +84,10 @@ android/generated
 
 # React Native Nitro Modules
 nitrogen/
+
+# Audio recordings — never commit
+*.wav
+*.pcm
+
+# Android CMake build cache
+android/.cxx/
