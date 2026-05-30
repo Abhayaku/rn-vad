@@ -1,6 +1,6 @@
 {
   "name": "rn-vad",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Real-time Voice Activity Detection (VAD) for React Native — speech, noise, and silence classification using WebRTC VAD with adaptive noise floor.",
   "main": "./lib/module/index.js",
   "types": "./lib/typescript/src/index.d.ts",
