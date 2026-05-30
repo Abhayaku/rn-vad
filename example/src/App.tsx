@@ -7,7 +7,7 @@ import {
   StatusBar,
   Platform,
 } from 'react-native';
-import { VAD, useVAD } from 'rn-vad';
+import { VAD, useVAD } from '@abhayaku/rn-vad';
 
 const SPEECH_COLOR = '#34C759';
 const NOISE_COLOR = '#FF9500';

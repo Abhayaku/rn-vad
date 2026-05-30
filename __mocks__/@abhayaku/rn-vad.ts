@@ -1,6 +1,6 @@
 import { jest } from '@jest/globals';
-import type { VADOptions, VADEventName, VADEventMap } from '../src/types';
-import type { UseVADOptions, UseVADResult } from '../src/useVAD';
+import type { VADOptions, VADEventName, VADEventMap } from '../../src/types';
+import type { UseVADOptions, UseVADResult } from '../../src/useVAD';
 
 const VAD = {
   configure: jest.fn((_options?: VADOptions) => Promise.resolve()),

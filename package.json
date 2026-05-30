@@ -1,5 +1,5 @@
 {
-  "name": "rn-vad",
+  "name": "@abhayaku/rn-vad",
   "version": "0.2.0",
   "description": "Real-time Voice Activity Detection (VAD) for React Native — speech, noise, and silence classification using WebRTC VAD with adaptive noise floor.",
   "main": "./lib/module/index.js",
@@ -67,7 +67,8 @@
   },
   "homepage": "https://github.com/Abhayaku/rn-vad#readme",
   "publishConfig": {
-    "registry": "https://registry.npmjs.org/"
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
   },
   "devDependencies": {
     "@commitlint/config-conventional": "^20.5.0",
@@ -156,7 +157,7 @@
       "tagName": "v${version}"
     },
     "npm": {
-      "publish": false
+      "publish": true
     },
     "github": {
       "release": true

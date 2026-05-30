@@ -2,7 +2,7 @@
   "compilerOptions": {
     "rootDir": ".",
     "paths": {
-      "rn-vad": ["./src/index"]
+      "@abhayaku/rn-vad": ["./src/index"]
     },
     "allowUnreachableCode": false,
     "allowUnusedLabels": false,
