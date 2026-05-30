@@ -6,12 +6,17 @@ const DEFAULT_OPTIONS: Required<VADOptions> = {
   sampleRate: 16000,
   frameMs: 20,
   mode: 2,
-  silenceTimeoutMs: 800,
+  silenceTimeoutMs: 500,
   noiseThresholdDb: -30,
-  speechOnsetMs: 60,
+  speechOnsetMs: 150,
   emitPcm: false,
   recordSegments: false,
   segmentOutputDir: '',
+  adaptiveThreshold: true,
+  adaptiveMarginDb: 15,
+  adaptationRate: 0.995,
+  initialNoiseFloor: -45,
+  minNoiseFloor: -80,
 };
 
 type EventSubscriptionModule = {
@@ -37,6 +42,11 @@ const VAD = {
       emitPcm: merged.emitPcm,
       recordSegments: merged.recordSegments,
       segmentOutputDir: merged.segmentOutputDir,
+      adaptiveThreshold: merged.adaptiveThreshold,
+      adaptiveMarginDb: merged.adaptiveMarginDb,
+      adaptationRate: merged.adaptationRate,
+      initialNoiseFloor: merged.initialNoiseFloor,
+      minNoiseFloor: merged.minNoiseFloor,
     });
   },
 

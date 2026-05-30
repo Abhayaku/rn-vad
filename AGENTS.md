@@ -109,7 +109,9 @@ Never merge a partial implementation (interface change without both platform imp
 ### VAD classification logic change (cross-agent)
 Must stay identical on both platforms:
 - iOS: `RNVad.mm` → `processFrame:samples:` method
-- Android: `AudioCaptureThread.kt` → `classifyActivity()` function
+- Android: `AudioCaptureThread.kt` → `processFrame()` function
+
+The adaptive noise floor (asymmetric EMA, hold counter, floor clamp) lives in both these methods and must be kept in sync. See CLAUDE.md → "Adaptive noise floor" for the exact algorithm.
 
 ---
 

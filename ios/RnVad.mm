@@ -46,10 +46,16 @@ class RnVadTurboModule : public NativeRnVadSpecJSI {
     BOOL   _emitPcm;
     BOOL   _recordSegments;
     NSString *_segmentOutputDir;
+    BOOL   _adaptiveThreshold;
+    double _adaptiveMarginDb;
+    double _adaptationRate;
+    double _initialNoiseFloor;
+    double _minNoiseFloor;
 
     double _speechOnsetMs;
     NSUInteger _speechOnsetCount;
     double _noiseFloor;
+    NSUInteger _holdCounter;
 
     BOOL   _running;
     BOOL   _inSpeech;
@@ -94,15 +100,20 @@ RCT_EXPORT_MODULE(RnVad)
         reject(@"ALREADY_RUNNING", @"Cannot configure while VAD is running — call stop() first", nil);
         return;
     }
-    _sampleRate       = (int)options.sampleRate();
-    _frameMs          = (int)options.frameMs();
-    _mode             = (int)options.mode();
-    _silenceTimeoutMs = options.silenceTimeoutMs();
-    _noiseThresholdDb = (float)options.noiseThresholdDb();
-    _speechOnsetMs    = options.speechOnsetMs();
-    _emitPcm          = options.emitPcm();
-    _recordSegments   = options.recordSegments();
-    _segmentOutputDir = options.segmentOutputDir() ?: @"";
+    _sampleRate        = (int)options.sampleRate();
+    _frameMs           = (int)options.frameMs();
+    _mode              = (int)options.mode();
+    _silenceTimeoutMs  = options.silenceTimeoutMs();
+    _noiseThresholdDb  = (float)options.noiseThresholdDb();
+    _speechOnsetMs     = options.speechOnsetMs();
+    _emitPcm           = options.emitPcm();
+    _recordSegments    = options.recordSegments();
+    _segmentOutputDir  = options.segmentOutputDir() ?: @"";
+    _adaptiveThreshold = options.adaptiveThreshold();
+    _adaptiveMarginDb  = options.adaptiveMarginDb();
+    _adaptationRate    = options.adaptationRate();
+    _initialNoiseFloor = options.initialNoiseFloor();
+    _minNoiseFloor     = options.minNoiseFloor();
     resolve(nil);
 }
 
@@ -160,7 +171,8 @@ RCT_EXPORT_MODULE(RnVad)
         }
 
         self->_accumulator = [NSMutableData data];
-        self->_frameSizeBytes = (NSUInteger)(self->_sampleRate * self->_frameMs / 1000) * sizeof(int16_t);
+        NSUInteger frameSamples = (NSUInteger)(self->_sampleRate * self->_frameMs / 1000);
+        self->_frameSizeBytes = frameSamples * sizeof(int16_t);
         if (self->_frameSizeBytes == 0) {
             self->_processor = nil;
             self->_converter = nil;
@@ -172,7 +184,8 @@ RCT_EXPORT_MODULE(RnVad)
         self->_inSpeech = NO;
         self->_silenceSince = 0;
         self->_speechOnsetCount = 0;
-        self->_noiseFloor = self->_noiseThresholdDb;
+        self->_noiseFloor = self->_adaptiveThreshold ? self->_initialNoiseFloor : self->_noiseThresholdDb;
+        self->_holdCounter = 0;
 
         __weak RnVad *weakSelf = self;
         [input installTapOnBus:0
@@ -301,23 +314,34 @@ RCT_EXPORT_MODULE(RnVad)
 }
 
 - (void)processFrame:(const int16_t *)frame samples:(NSUInteger)n {
-    VADFrameResult r = [_processor processFrame:frame length:n];
     double now = [[NSDate date] timeIntervalSince1970] * 1000.0;
+    VADFrameResult r = [_processor processFrame:frame length:n];
+    float energyDb = r.energyDb;
+    BOOL isSpeechSignal = r.vadResult == 1;
 
-    // Adaptive noise floor — asymmetric EMA: rises slowly, decays faster.
-    // Only update when not in speech and not building speech onset.
-    if (!_inSpeech && _speechOnsetCount == 0) {
-        double alpha = (r.energyDb > _noiseFloor) ? 0.99 : 0.95;
-        _noiseFloor = alpha * _noiseFloor + (1.0 - alpha) * r.energyDb;
+    double effectiveThreshold;
+    if (_adaptiveThreshold) {
+        if (!_inSpeech && _speechOnsetCount == 0 && _holdCounter == 0) {
+            double alpha = (energyDb < _noiseFloor) ? 0.90 : _adaptationRate;
+            _noiseFloor = alpha * _noiseFloor + (1.0 - alpha) * energyDb;
+            if (_noiseFloor < _minNoiseFloor) _noiseFloor = _minNoiseFloor;
+        }
+        if (!_inSpeech && _holdCounter > 0) _holdCounter--;
+        effectiveThreshold = _noiseFloor + _adaptiveMarginDb;
+    } else {
+        effectiveThreshold = _noiseThresholdDb;
     }
-    double effectiveThreshold = _noiseFloor + 8.0;
+
+    BOOL isSpeech = energyDb > effectiveThreshold && isSpeechSignal;
 
     NSString *type;
-    if (r.energyDb <= effectiveThreshold)  type = @"silence";
-    else if (r.vadResult == 1)             type = @"speech";
-    else                                   type = @"noise";
-
-    BOOL isSpeech = [type isEqualToString:@"speech"];
+    if (_inSpeech) {
+        type = @"speech";
+    } else if (energyDb > effectiveThreshold && isSpeechSignal) {
+        type = @"noise";
+    } else {
+        type = @"silence";
+    }
     NSUInteger onsetThreshold = (_speechOnsetMs > 0 && _frameMs > 0)
         ? (NSUInteger)ceil(_speechOnsetMs / _frameMs) : 1;
 
@@ -341,6 +365,7 @@ RCT_EXPORT_MODULE(RnVad)
             if (now - _silenceSince >= _silenceTimeoutMs) {
                 _inSpeech = NO;
                 _speechOnsetCount = 0;
+                _holdCounter = 30;
                 double duration = now - _speechStartTime;
                 NSString *path = [self finishSegment];
                 NSMutableDictionary *body = [@{@"duration":@(duration),@"timestamp":@(now)} mutableCopy];
@@ -354,8 +379,8 @@ RCT_EXPORT_MODULE(RnVad)
     if (_recordSegments && _inSpeech) [self writeSegmentSamples:frame length:n];
 
     [self emitEvent:kEventVoiceActivity body:@{
-        @"isSpeaking": @(isSpeech), @"type": type,
-        @"energyDb": @(r.energyDb), @"noiseFloor": @(_noiseFloor),
+        @"isSpeaking": @(_inSpeech), @"type": type,
+        @"energyDb": @(energyDb), @"noiseFloor": @(_noiseFloor),
         @"threshold": @(effectiveThreshold), @"timestamp": @(now)
     }];
 

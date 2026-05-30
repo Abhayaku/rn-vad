@@ -1,8 +1,8 @@
 # rn-vad
 
-Voice Activity Detection (VAD) for React Native. Detects **speech** (positive), **background noise** (negative), and **silence** in real time — on both iOS and Android.
+Real-time Voice Activity Detection (VAD) for React Native. Classifies microphone input as **speech**, **noise**, or **silence** on every audio frame — on both iOS and Android.
 
-Built on [libfvad](https://github.com/dpirch/libfvad) (standalone WebRTC VAD C library). New Architecture (TurboModules) only.
+Built on [libfvad](https://github.com/dpirch/libfvad) (WebRTC VAD C library, BSD-3-Clause). New Architecture (TurboModules) only.
 
 ---
 
@@ -10,8 +10,9 @@ Built on [libfvad](https://github.com/dpirch/libfvad) (standalone WebRTC VAD C l
 
 - Real-time speech vs silence detection
 - Three-way classification: `speech` | `noise` | `silence`
+- Adaptive noise floor — threshold adjusts to ambient noise in real time
 - Configurable aggressiveness (4 WebRTC VAD modes)
-- Energy/dB level events for waveform meters
+- Energy/dBFS level events for waveform meters
 - Raw PCM chunk callbacks (for streaming to STT)
 - Auto-save speech segments as WAV files
 - Microphone permission helper
@@ -46,7 +47,7 @@ yarn add rn-vad
 cd ios && pod install
 ```
 
-No extra setup needed — libfvad C sources are vendored in the package.
+No extra setup — libfvad C sources are vendored in the package.
 
 Add the microphone usage description to your app's `Info.plist`:
 
@@ -55,9 +56,9 @@ Add the microphone usage description to your app's `Info.plist`:
 <string>Microphone is required for voice detection.</string>
 ```
 
-### Android permissions
+### Android
 
-`RECORD_AUDIO` is declared in the library manifest and merged automatically.
+`RECORD_AUDIO` is declared in the library manifest and merged automatically. No manual changes needed.
 
 ---
 
@@ -97,11 +98,8 @@ const granted = await VAD.requestMicPermission();
 if (!granted) return;
 
 await VAD.configure({
-  sampleRate: 16000,
-  frameMs: 20,
   mode: 2,
-  silenceTimeoutMs: 800,
-  noiseThresholdDb: -45,
+  silenceTimeoutMs: 500,
   recordSegments: true,
 });
 
@@ -127,19 +125,24 @@ unsub2();
 
 ### `VAD.configure(options): Promise<void>`
 
-Must be called before `start()`.
+Must be called before `start()`. All options are optional — defaults are applied for any omitted field.
 
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `sampleRate` | `8000\|16000\|32000\|48000` | `16000` | Microphone sample rate (Hz) |
 | `frameMs` | `10\|20\|30` | `20` | Frame duration fed to WebRTC VAD |
 | `mode` | `0\|1\|2\|3` | `2` | VAD aggressiveness (see table below) |
-| `silenceTimeoutMs` | `number` | `800` | Silence ms before `speechEnd` fires |
-| `noiseThresholdDb` | `number` | `-30` | dBFS threshold — below = silence. Lower = more sensitive (picks up quiet sounds); higher = less sensitive (requires louder input). Typical speech is −20 to −10 dBFS. |
-| `speechOnsetMs` | `number` | `60` | Consecutive speech ms required before `speechStart` fires — prevents noise spikes from triggering speech |
+| `silenceTimeoutMs` | `number` | `500` | Silence ms before `speechEnd` fires |
+| `noiseThresholdDb` | `number` | `-30` | Fixed dBFS threshold when `adaptiveThreshold: false` |
+| `speechOnsetMs` | `number` | `150` | Consecutive speech ms required before `speechStart` fires — prevents noise spikes from triggering |
 | `emitPcm` | `boolean` | `false` | Emit raw PCM via `pcmData` event |
-| `recordSegments` | `boolean` | `false` | Auto-save speech segments as WAV |
-| `segmentOutputDir` | `string` | app cache | Output dir for WAV files |
+| `recordSegments` | `boolean` | `false` | Auto-save speech segments as WAV files |
+| `segmentOutputDir` | `string` | system temp | Output directory for WAV files |
+| `adaptiveThreshold` | `boolean` | `true` | Adapt noise floor to ambient in real time. When `false`, uses fixed `noiseThresholdDb` |
+| `adaptiveMarginDb` | `number` | `15` | dB above the adaptive noise floor that sets the speech threshold |
+| `adaptationRate` | `number` | `0.995` | EMA alpha for upward floor drift (0–1). Higher = slower adaptation |
+| `initialNoiseFloor` | `number` | `-45` | dBFS starting estimate before adaptation kicks in |
+| `minNoiseFloor` | `number` | `-80` | dBFS floor clamp — noise floor never drops below this |
 
 #### VAD Modes
 
@@ -182,12 +185,16 @@ Subscribes to an event. Returns an unsubscribe function.
 
 ```ts
 VAD.on('voiceActivity', (e: VADActivity) => {
-  e.isSpeaking  // true when type === 'speech'
-  e.type        // 'speech' | 'noise' | 'silence'
-  e.energyDb    // dBFS (typically -160 to 0)
+  e.isSpeaking  // true for the full duration of a speech segment (speechStart → speechEnd)
+  e.type        // 'speech' | 'noise' | 'silence' — per-frame classification
+  e.energyDb    // dBFS of current frame (typically -160 to 0)
+  e.noiseFloor  // dBFS — current adaptive noise floor estimate
+  e.threshold   // dBFS — active speech threshold (noiseFloor + adaptiveMarginDb)
   e.timestamp   // epoch ms
 });
 ```
+
+> `isSpeaking` reflects the FSM state — it is `true` from `speechStart` through `speechEnd`, regardless of per-frame energy dips. `type` reflects the current frame's per-frame classification.
 
 ### `speechStart` — speech segment began
 
@@ -199,13 +206,13 @@ VAD.on('speechStart', (e: SpeechStartEvent) => {
 
 ### `speechEnd` — speech segment ended
 
-Fires after `silenceTimeoutMs` of non-speech.
+Fires after `silenceTimeoutMs` of consecutive non-speech frames.
 
 ```ts
 VAD.on('speechEnd', (e: SpeechEndEvent) => {
-  e.duration      // ms of speech
+  e.duration      // ms of speech segment
   e.timestamp     // epoch ms
-  e.segmentPath   // path to WAV (only when recordSegments=true)
+  e.segmentPath   // absolute path to WAV (only when recordSegments: true)
 });
 ```
 
@@ -233,10 +240,29 @@ VAD.on('error', (e: VADError) => {
 ## Classification Logic
 
 ```
-energyDb > noiseThresholdDb  AND  webrtcVad == 1  →  'speech'   (positive — user speaking)
-energyDb > noiseThresholdDb  AND  webrtcVad == 0  →  'noise'    (negative — background sound)
-energyDb ≤ noiseThresholdDb                        →  'silence'
+threshold = adaptiveThreshold
+  ? noiseFloor + adaptiveMarginDb   ← real-time adaptive (default)
+  : noiseThresholdDb                ← fixed
+
+Per-frame signal (outside a speech segment):
+  energyDb > threshold  AND  webrtcVad == 1  →  type = 'noise'  (speech onset accumulating)
+  energyDb > threshold  AND  webrtcVad == 0  →  type = 'noise'
+  energyDb ≤ threshold                        →  type = 'silence'
+
+During a speech segment (after speechStart fires):
+  type = 'speech', isSpeaking = true — until silenceTimeoutMs of non-speech elapses
 ```
+
+Speech onset requires `speechOnsetMs` of consecutive speech signal before `speechStart` fires. A single non-speech frame resets the onset counter.
+
+### Adaptive noise floor
+
+When `adaptiveThreshold: true` (default), the noise floor tracks ambient energy using an asymmetric EMA:
+
+- **Downward (room quieter):** α = 0.90 — adapts in ~200ms
+- **Upward (room louder):** α = `adaptationRate` (default 0.995) — resists noise bursts, drifts gradually
+
+The floor only updates when the VAD is **not in a speech segment** and **not in the post-speech hold window** (30 frames ≈ 600ms after each `speechEnd`). This prevents speech and reverb from corrupting the floor estimate.
 
 ---
 
@@ -261,13 +287,13 @@ All `VADOptions` fields plus:
 
 | Field | Type | Description |
 |---|---|---|
-| `isSpeaking` | `boolean` | Current frame is speech |
-| `isNoise` | `boolean` | Current frame is noise |
-| `isSilence` | `boolean` | Current frame is silence |
-| `energyDb` | `number` | Current energy dBFS |
-| `isRunning` | `boolean` | VAD active |
-| `start` | `() => Promise<void>` | Calls configure + start |
-| `stop` | `() => Promise<void>` | Stops VAD |
+| `isSpeaking` | `boolean` | `true` for the full duration of a speech segment |
+| `isNoise` | `boolean` | Current frame is above threshold but not in a speech segment |
+| `isSilence` | `boolean` | Current frame is below threshold |
+| `energyDb` | `number` | Current frame energy in dBFS |
+| `isRunning` | `boolean` | VAD is active |
+| `start` | `() => Promise<void>` | Configure and start VAD |
+| `stop` | `() => Promise<void>` | Stop VAD |
 | `error` | `VADError \| null` | Last error |
 
 ---
@@ -299,15 +325,9 @@ JS (TypeScript)
 
 ---
 
-## Post-v1 Roadmap
+## Attribution
 
-- Noise suppression (RNNoise C library) pre-processing
-- Wakeword detection (Picovoice Porcupine)
-- Streaming STT bridge (Whisper / Deepgram)
-- Silence padding around segments
-- Auto Gain Control
-- `react-native-web` + WebAudio API fallback
-- Expo module variant (`expo-modules-core`)
+This package vendors [libfvad](https://github.com/dpirch/libfvad) — a standalone WebRTC VAD library by Daniel Pirch, derived from the [WebRTC project](https://webrtc.org/) by Google. Licensed under BSD 3-Clause (see `ios/fvad/LICENSE`).
 
 ---
 

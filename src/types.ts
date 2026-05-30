@@ -4,15 +4,34 @@ export type FrameMs = 10 | 20 | 30;
 export type ActivityType = 'speech' | 'noise' | 'silence';
 
 export interface VADOptions {
-  sampleRate?: SampleRate; // Microphone sample rate (Hz)
-  frameMs?: FrameMs; // Frame duration fed to WebRTC VAD
-  mode?: VADMode; // 0=Quality 1=LowBitrate 2=Aggressive 3=VeryAggressive
-  silenceTimeoutMs?: number; // Silence ms before speechEnd fires
-  noiseThresholdDb?: number; // dBFS threshold — below = silence. Lower = more sensitive (picks up quiet sounds); higher = less sensitive (requires louder input). Typical speech is −20 to −10 dBFS.
-  speechOnsetMs?: number; // Consecutive speech ms required before speechStart fires — prevents noise spikes from triggering speech
-  emitPcm?: boolean; // Emit raw PCM buffers via pcmData event
-  recordSegments?: boolean; // Auto-save speech segments as WAV
-  segmentOutputDir?: string; // Directory to write WAV files (default: app cache dir)
+  /** Microphone sample rate in Hz. Default: 16000 */
+  sampleRate?: SampleRate;
+  /** Duration of each audio frame fed to WebRTC VAD. Default: 20 */
+  frameMs?: FrameMs;
+  /** WebRTC VAD aggressiveness: 0 = quality, 3 = very aggressive. Default: 2 */
+  mode?: VADMode;
+  /** Consecutive silence ms required after speech before speechEnd fires. Default: 500 */
+  silenceTimeoutMs?: number;
+  /** Fixed dBFS speech threshold when adaptiveThreshold is false. Default: -30 */
+  noiseThresholdDb?: number;
+  /** Consecutive speech ms required before speechStart fires — prevents noise spikes. Default: 150 */
+  speechOnsetMs?: number;
+  /** Emit raw PCM samples via pcmData event on every frame. Default: false */
+  emitPcm?: boolean;
+  /** Auto-save each speech segment as a WAV file. Default: false */
+  recordSegments?: boolean;
+  /** Directory for saved WAV files. Default: system temp directory */
+  segmentOutputDir?: string;
+  /** Adapt speech threshold to ambient noise in real time. Default: true */
+  adaptiveThreshold?: boolean;
+  /** dB above the adaptive noise floor that becomes the speech threshold. Default: 15 */
+  adaptiveMarginDb?: number;
+  /** EMA alpha for upward floor drift (0–1). Higher = slower adaptation. Default: 0.995 */
+  adaptationRate?: number;
+  /** dBFS starting noise floor estimate before adaptation kicks in. Default: -45 */
+  initialNoiseFloor?: number;
+  /** dBFS floor clamp — noise floor never drops below this. Default: -80 */
+  minNoiseFloor?: number;
 }
 
 export interface VADActivity {

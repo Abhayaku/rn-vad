@@ -61,10 +61,7 @@ export default function App() {
     stop,
     error,
   } = useVAD({
-    sampleRate: 16000,
-    frameMs: 20,
-    mode: 2,
-    silenceTimeoutMs: 800,
+    mode: 3,
     onVoiceActivity: (e) => {
       setNoiseFloor(e.noiseFloor);
       setThreshold(e.threshold);

@@ -11,6 +11,11 @@ export interface VADNativeOptions {
   emitPcm: boolean;
   recordSegments: boolean;
   segmentOutputDir: string;
+  adaptiveThreshold: boolean;
+  adaptiveMarginDb: number;
+  adaptationRate: number;
+  initialNoiseFloor: number;
+  minNoiseFloor: number;
 }
 
 export interface Spec extends TurboModule {

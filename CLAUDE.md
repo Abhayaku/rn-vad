@@ -75,6 +75,7 @@ rn-vad/
 6. **WAV header** is 44 bytes, little-endian PCM. iOS (`RNVad.mm`) and Android (`AudioCaptureThread.kt`) must write identical format.
 7. **useVAD cleanup** — all event subscriptions must be unsubscribed in the `useEffect` cleanup. No subscriptions outside the effect.
 8. **iOS AVAudioEngine must run on main thread** — `start` and `stop`/`destroy` dispatch ALL AVAudioEngine and AVAudioSession operations to `dispatch_get_main_queue()`. On iOS 16+ the thread checker throws `NSInternalInconsistencyException` if accessed from a background thread. Any new method that touches audio must do the same.
+9. **Adaptive threshold parity** — floor update logic in `RNVad.mm:processFrame` and `AudioCaptureThread.kt:processFrame` must stay identical. Both use asymmetric EMA (fast down α=0.90, slow up α=`adaptationRate`) with the same gate conditions and 30-frame post-speech hold.
 
 ---
 
@@ -119,12 +120,27 @@ cd example && yarn android
 ## VAD Classification Logic
 
 ```
-energyDb > noiseThresholdDb  AND  webrtcVad == 1  →  'speech'   (positive — user speaking)
-energyDb > noiseThresholdDb  AND  webrtcVad == 0  →  'noise'    (negative — background sound)
-energyDb ≤ noiseThresholdDb                        →  'silence'
+threshold = adaptiveThreshold
+  ? noiseFloor + adaptiveMarginDb   ← default (real-time adaptive)
+  : noiseThresholdDb                ← fixed
+
+energyDb > threshold  AND  webrtcVad == 1  →  'speech'
+energyDb > threshold  AND  webrtcVad == 0  →  'noise'
+energyDb ≤ threshold                        →  'silence'
 ```
 
-Default `noiseThresholdDb = -30` dBFS. Implemented identically in iOS (`RNVad.mm:processFrame`) and Android (`AudioCaptureThread.kt:classifyActivity`).
+Implemented identically in iOS (`RNVad.mm:processFrame`) and Android (`AudioCaptureThread.kt:processFrame`).
+
+### Adaptive noise floor (asymmetric EMA)
+
+- Update gate: only when `!inSpeech && speechOnsetCount == 0 && holdCounter == 0`
+- Downward (energy < floor): α = 0.90 — fast descent to real ambient level
+- Upward (energy > floor): α = `adaptationRate` (default 0.995) — slow rise, resists noise bursts
+- Post-speech hold: 30 frames after `speechEnd` (~600ms at 20ms frames) — prevents reverb from corrupting floor
+- Floor clamp: never below `minNoiseFloor` (default −80 dBFS)
+- Initial floor: `initialNoiseFloor` (default −55 dBFS)
+
+When `adaptiveThreshold: false`, floor update is skipped — fixed `noiseThresholdDb` used directly.
 
 ---
 

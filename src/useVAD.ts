@@ -39,9 +39,9 @@ export function useVAD(options: UseVADOptions = {}): UseVADResult {
 
   useEffect(() => {
     const unsubActivity = VAD.on('voiceActivity', (e) => {
-      setIsSpeaking(e.type === 'speech');
-      setIsNoise(e.type === 'noise');
-      setIsSilence(e.type === 'silence');
+      setIsSpeaking(e.isSpeaking);
+      setIsNoise(!e.isSpeaking && e.type === 'noise');
+      setIsSilence(!e.isSpeaking && e.type === 'silence');
       setEnergyDb(e.energyDb);
       optionsRef.current.onVoiceActivity?.(e);
     });

@@ -21,12 +21,17 @@ class RnVadModule(reactContext: ReactApplicationContext) :
             sampleRate = options.getIntOr("sampleRate", 16000),
             frameMs = options.getIntOr("frameMs", 20),
             mode = options.getIntOr("mode", 2),
-            silenceTimeoutMs = options.getDoubleOr("silenceTimeoutMs", 800.0).toLong(),
-            noiseThresholdDb = options.getDoubleOr("noiseThresholdDb", -45.0).toFloat(),
-            speechOnsetMs = options.getDoubleOr("speechOnsetMs", 60.0).toLong(),
+            silenceTimeoutMs = options.getDoubleOr("silenceTimeoutMs", 500.0).toLong(),
+            noiseThresholdDb = options.getDoubleOr("noiseThresholdDb", -30.0).toFloat(),
+            speechOnsetMs = options.getDoubleOr("speechOnsetMs", 150.0).toLong(),
             emitPcm = options.getBoolOr("emitPcm", false),
             recordSegments = options.getBoolOr("recordSegments", false),
             segmentOutputDir = options.getStringOr("segmentOutputDir", ""),
+            adaptiveThreshold = options.getBoolOr("adaptiveThreshold", true),
+            adaptiveMarginDb = options.getDoubleOr("adaptiveMarginDb", 15.0),
+            adaptationRate = options.getDoubleOr("adaptationRate", 0.995),
+            initialNoiseFloor = options.getDoubleOr("initialNoiseFloor", -45.0),
+            minNoiseFloor = options.getDoubleOr("minNoiseFloor", -80.0),
         )
         promise.resolve(null)
     }
@@ -36,7 +41,7 @@ class RnVadModule(reactContext: ReactApplicationContext) :
             promise.reject("ALREADY_RUNNING", "VAD already running")
             return
         }
-        val thread = AudioCaptureThread(config)
+        val thread = AudioCaptureThread(config, reactApplicationContext)
         thread.onSpeechStart = { timestamp ->
             emit("RnVad.speechStart", Arguments.createMap().apply {
                 putDouble("timestamp", timestamp.toDouble())
@@ -49,14 +54,9 @@ class RnVadModule(reactContext: ReactApplicationContext) :
                 segmentPath?.let { putString("segmentPath", it) }
             })
         }
-        thread.onActivity = { vadResult, energyDb, noiseFloor, threshold, pcmFrame ->
-            val type = when {
-                energyDb <= threshold -> "silence"
-                vadResult == 1 -> "speech"
-                else -> "noise"
-            }
+        thread.onActivity = { isSpeaking, type, energyDb, noiseFloor, threshold, pcmFrame ->
             emit("RnVad.voiceActivity", Arguments.createMap().apply {
-                putBoolean("isSpeaking", type == "speech")
+                putBoolean("isSpeaking", isSpeaking)
                 putString("type", type)
                 putDouble("energyDb", energyDb.toDouble())
                 putDouble("noiseFloor", noiseFloor)

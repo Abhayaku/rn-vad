@@ -1,7 +1,7 @@
 {
   "name": "rn-vad",
   "version": "0.1.0",
-  "description": "This package is for Voice Activity Detection (VAD) of device.(VAD)n)",
+  "description": "Real-time Voice Activity Detection (VAD) for React Native — speech, noise, and silence classification using WebRTC VAD with adaptive noise floor.",
   "main": "./lib/module/index.js",
   "types": "./lib/typescript/src/index.d.ts",
   "exports": {
@@ -45,7 +45,16 @@
   "keywords": [
     "react-native",
     "ios",
-    "android"
+    "android",
+    "vad",
+    "voice-activity-detection",
+    "speech-detection",
+    "speech-recognition",
+    "webrtc",
+    "microphone",
+    "audio",
+    "turbomodule",
+    "new-architecture"
   ],
   "repository": {
     "type": "git",

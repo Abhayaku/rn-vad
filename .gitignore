@@ -92,3 +92,6 @@ nitrogen/
 
 # Android CMake build cache
 android/.cxx/
+
+# Kotlin compiler cache
+example/android/.kotlin/

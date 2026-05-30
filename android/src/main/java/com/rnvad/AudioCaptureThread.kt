@@ -1,6 +1,7 @@
 package com.rnvad
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
@@ -13,14 +14,14 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.ArrayDeque
 
-internal class AudioCaptureThread(private val config: VADConfig) {
+internal class AudioCaptureThread(private val config: VADConfig, private val context: Context) {
 
     private var audioRecord: AudioRecord? = null
     private var handlerThread: HandlerThread? = null
     private var handler: Handler? = null
     @Volatile private var running = false
 
-    var onActivity: ((vadResult: Int, energyDb: Float, noiseFloor: Double, threshold: Double, pcmFrame: ShortArray?) -> Unit)? = null
+    var onActivity: ((isSpeaking: Boolean, type: String, energyDb: Float, noiseFloor: Double, threshold: Double, pcmFrame: ShortArray?) -> Unit)? = null
     var onSpeechStart: ((timestamp: Long) -> Unit)? = null
     var onSpeechEnd: ((duration: Long, timestamp: Long, segmentPath: String?) -> Unit)? = null
     var onError: ((code: String, message: String) -> Unit)? = null
@@ -28,11 +29,12 @@ internal class AudioCaptureThread(private val config: VADConfig) {
     private val frameSize: Int get() = config.sampleRate * config.frameMs / 1000
     private var processor: VadProcessor? = null
 
-    private var noiseFloor: Double = config.noiseThresholdDb.toDouble()
+    private var noiseFloor: Double = config.initialNoiseFloor
     private var inSpeech = false
     private var speechOnsetCount = 0
     private var speechStartTime = 0L
     private var silenceSince = 0L
+    private var holdCounter = 0
     private var segmentOutputStream: FileOutputStream? = null
     private var segmentFile: File? = null
     private var segmentSamples = 0
@@ -97,23 +99,27 @@ internal class AudioCaptureThread(private val config: VADConfig) {
     }
 
     private fun processFrame(frame: ShortArray) {
-        val proc = processor ?: return
-        val result = proc.process(frame)
         val now = System.currentTimeMillis()
 
-        // Adaptive noise floor — asymmetric EMA: rises slowly, decays faster.
-        if (!inSpeech && speechOnsetCount == 0) {
-            val alpha = if (result.energyDb > noiseFloor) 0.99 else 0.95
-            noiseFloor = alpha * noiseFloor + (1.0 - alpha) * result.energyDb
-        }
-        val effectiveThreshold = noiseFloor + 8.0
+        val proc = processor ?: return
+        val result = proc.process(frame)
+        val energyDb = result.energyDb
+        val isSpeechSignal = result.vadResult == 1
 
-        val type = when {
-            result.energyDb <= effectiveThreshold -> "silence"
-            result.vadResult == 1 -> "speech"
-            else -> "noise"
+        val effectiveThreshold: Double
+        if (config.adaptiveThreshold) {
+            if (!inSpeech && speechOnsetCount == 0 && holdCounter == 0) {
+                val alpha = if (energyDb < noiseFloor) 0.90 else config.adaptationRate
+                noiseFloor = alpha * noiseFloor + (1.0 - alpha) * energyDb
+                if (noiseFloor < config.minNoiseFloor) noiseFloor = config.minNoiseFloor
+            }
+            if (!inSpeech && holdCounter > 0) holdCounter--
+            effectiveThreshold = noiseFloor + config.adaptiveMarginDb
+        } else {
+            effectiveThreshold = config.noiseThresholdDb.toDouble()
         }
-        val isSpeech = type == "speech"
+
+        val isSpeech = energyDb > effectiveThreshold && isSpeechSignal
         val onsetThreshold = if (config.speechOnsetMs > 0 && config.frameMs > 0)
             Math.ceil(config.speechOnsetMs.toDouble() / config.frameMs).toInt() else 1
 
@@ -138,6 +144,7 @@ internal class AudioCaptureThread(private val config: VADConfig) {
                 if (now - silenceSince >= config.silenceTimeoutMs) {
                     inSpeech = false
                     speechOnsetCount = 0
+                    holdCounter = 30
                     val duration = now - speechStartTime
                     val path = finishSegment(discard = false)
                     onSpeechEnd?.invoke(duration, now, path)
@@ -148,8 +155,13 @@ internal class AudioCaptureThread(private val config: VADConfig) {
 
         if (config.recordSegments && inSpeech) writeSegmentSamples(frame)
 
+        val type = when {
+            inSpeech -> "speech"
+            energyDb > effectiveThreshold && isSpeechSignal -> "noise"
+            else -> "silence"
+        }
         val pcm = if (config.emitPcm) frame else null
-        onActivity?.invoke(result.vadResult, result.energyDb, noiseFloor, effectiveThreshold, pcm)
+        onActivity?.invoke(inSpeech, type, energyDb, noiseFloor, effectiveThreshold, pcm)
     }
 
     private fun startSegment(timestamp: Long) {
