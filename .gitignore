@@ -45,6 +45,7 @@ android.iml
 #
 example/ios/Pods
 example/ios/*.xcworkspace
+example/ios/Podfile.lock
 
 # Ruby
 example/vendor/
