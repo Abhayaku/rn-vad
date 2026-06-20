@@ -4,13 +4,13 @@ pre-commit:
 
     lint:
       glob: "*.{js,ts,jsx,tsx}"
-      run: npx eslint {staged_files}
+      run: bash -c '. "$HOME/.nvm/nvm.sh" && ./node_modules/.bin/eslint {staged_files}'
 
     types:
       glob: "*.{js,ts, jsx, tsx}"
-      run: npx tsc
+      run: bash -c '. "$HOME/.nvm/nvm.sh" && ./node_modules/.bin/tsc'
 commit-msg:
   parallel: true
   commands:
     commitlint:
-      run: npx commitlint --edit
+      run: bash -c '. "$HOME/.nvm/nvm.sh" && ./node_modules/.bin/commitlint --edit'
