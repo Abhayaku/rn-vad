@@ -120,7 +120,9 @@ jobs:
     runs-on: macos-latest
 
     env:
-      XCODE_VERSION: 16
+      # macos-latest runners no longer ship Xcode 16 (only 26.x) — track the
+      # newest stable on the image instead of a hard pin.
+      XCODE_VERSION: latest-stable
       TURBO_CACHE_DIR: .turbo/ios
       RCT_USE_RN_DEP: 1
       RCT_USE_PREBUILT_RNCORE: 1
