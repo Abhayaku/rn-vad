@@ -123,8 +123,12 @@ RCT_EXPORT_MODULE(RnVad)
 
         NSError *err = nil;
         AVAudioSession *session = [AVAudioSession sharedInstance];
+        // VoiceChat, not Measurement: Measurement disables input AGC, which
+        // leaves older single-mic devices (iPhone XR and earlier) with a raw
+        // signal 30-40 dB too quiet for energy-based VAD. VoiceChat keeps AGC
+        // and adds echo cancellation so far-end playback doesn't trigger VAD.
         [session setCategory:AVAudioSessionCategoryPlayAndRecord
-                         mode:AVAudioSessionModeMeasurement
+                         mode:AVAudioSessionModeVoiceChat
                       options:AVAudioSessionCategoryOptionDefaultToSpeaker
                             | AVAudioSessionCategoryOptionAllowBluetooth
                         error:&err];
