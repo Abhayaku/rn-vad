@@ -70,11 +70,14 @@ internal class AudioCaptureThread(private val config: VADConfig, private val con
         running = false
         handler?.removeCallbacksAndMessages(null)
         audioRecord?.stop()
-        audioRecord?.release()
-        audioRecord = null
+        // The capture loop may be mid-frame inside AudioRecord.read() or fvad on its own thread;
+        // releasing either under it is a native use-after-free that aborts the process later.
         handlerThread?.quitSafely()
+        handlerThread?.join()
         handlerThread = null
         handler = null
+        audioRecord?.release()
+        audioRecord = null
         processor?.destroy()
         processor = null
         finishSegment(discard = true)
